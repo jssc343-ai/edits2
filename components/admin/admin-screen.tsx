@@ -37,18 +37,47 @@ function Empty({ text }: { text: string }) {
 
 function LoginForm({ configured, onDone }: { configured: boolean; onDone: () => void }) {
   const { t } = useApp();
-  const [passcode, setPasscode] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function sendCode() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (res.status === 403) {
+        toast.error(t("adminNotAllowed"));
+        return;
+      }
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { token: string };
+      setToken(data.token);
+      toast.success(t("adminCodeSent"));
+    } catch {
+      toast.error(t("adminUnavailable"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!token) {
+      await sendCode();
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/admin/session", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode }),
+        body: JSON.stringify({ email, code, token }),
       });
       if (!res.ok) throw new Error();
       onDone();
@@ -64,19 +93,34 @@ function LoginForm({ configured, onDone }: { configured: boolean; onDone: () => 
       <h1 className="text-xl font-semibold">{t("adminLogin")}</h1>
       {!configured ? <p className="text-sm text-accent">{t("adminUnavailable")}</p> : null}
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="passcode">{t("passcode")}</Label>
+        <Label htmlFor="admin-email">{t("adminEmail")}</Label>
         <Input
-          id="passcode"
-          type="password"
-          autoComplete="current-password"
-          value={passcode}
-          onChange={(e) => setPasscode(e.target.value)}
+          id="admin-email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={Boolean(token)}
           className="h-11"
         />
       </div>
-      <Button type="submit" className="h-11" disabled={busy || !passcode || !configured}>
+      {token ? (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="admin-code">{t("adminCode")}</Label>
+          <Input
+            id="admin-code"
+            inputMode="numeric"
+            maxLength={6}
+            autoComplete="one-time-code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            className="h-11"
+          />
+        </div>
+      ) : null}
+      <Button type="submit" className="h-11" disabled={busy || !email || !configured || (Boolean(token) && code.length !== 6)}>
         {busy ? <Spinner /> : null}
-        {t("login")}
+        {token ? t("login") : t("adminSendCode")}
       </Button>
     </form>
   );

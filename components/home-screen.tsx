@@ -90,10 +90,7 @@ export function HomeScreen() {
           ))}
         </div>
         <Button asChild size="lg" className="h-12 text-base">
-          <Link href="/studio">{t("openStudio")}</Link>
-        </Button>
-        <Button asChild size="lg" variant="outline" className="h-12 text-base">
-          <Link href="/pro">{t("proEditor")}</Link>
+          <Link href="/pro">{t("openStudio")}</Link>
         </Button>
         <p className="text-center text-sm text-muted-foreground">{t("notSaved")}</p>
       </section>

@@ -14,18 +14,36 @@ export function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
+const DEFAULT_ADMIN_EMAILS = ["jangshch10998@gmail.com", "a0935309655@gmail.com"];
+
+export function adminEmails(): string[] {
+  const extra = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set([...DEFAULT_ADMIN_EMAILS, ...extra]));
+}
+
+export function isAdminEmail(email: string): boolean {
+  return adminEmails().includes(email.trim().toLowerCase());
+}
+
+function sessionSecret(): string {
+  return process.env.ADMIN_PASSCODE || process.env.RESEND_API_KEY || "";
+}
+
 export function adminConfigured(): boolean {
-  return Boolean(process.env.ADMIN_PASSCODE);
+  return Boolean(sessionSecret());
 }
 
 export function makeAdminToken(): string {
-  const secret = process.env.ADMIN_PASSCODE ?? "";
+  const secret = sessionSecret();
   const exp = String(Date.now() + SESSION_MS);
   return `${exp}.${sign(`admin.${exp}`, secret)}`;
 }
 
 export async function isAdmin(): Promise<boolean> {
-  const secret = process.env.ADMIN_PASSCODE;
+  const secret = sessionSecret();
   if (!secret) return false;
   const token = (await cookies()).get(ADMIN_COOKIE)?.value;
   if (!token) return false;

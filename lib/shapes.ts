@@ -12,7 +12,8 @@ export interface ShapeItem {
   rows: number;
   cols: number;
   z?: number;
-  }
+  alpha?: number;
+}
 
 export interface ShapeDef {
   id: string;
@@ -78,6 +79,7 @@ export function drawShape(c: CanvasRenderingContext2D, it: ShapeItem, W: number)
   const hh = ph / 2;
   const lw = Math.max(1, (it.stroke / 100) * W * 0.5);
   c.save();
+  c.globalAlpha = Math.min(1, Math.max(0, it.alpha ?? 1));
   c.translate(it.x * c.canvas.width, it.y * c.canvas.height);
   c.rotate((it.rot * Math.PI) / 180);
   c.lineWidth = lw;

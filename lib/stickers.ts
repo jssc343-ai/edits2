@@ -1,4 +1,5 @@
 import { EXTRA_STICKERS } from "@/lib/stickers-extra";
+import { REAL3D_STICKERS } from "@/lib/stickers-3d";
 
 export interface StickerItem {
   id: string;
@@ -10,6 +11,9 @@ export interface StickerItem {
   end: number;
   rot?: number;
   z?: number;
+  sx?: number;
+  sy?: number;
+  alpha?: number;
 }
 
 export interface StickerDef {
@@ -18,6 +22,7 @@ export interface StickerDef {
   en: string;
   animated: boolean;
   cat?: "wear" | "scene" | "atmo";
+  real3d?: boolean;
   draw: (c: CanvasRenderingContext2D, r: number, t: number) => void;
 }
 
@@ -1207,6 +1212,7 @@ export const STICKERS: StickerDef[] = [
     },
   },
   ...EXTRA_STICKERS,
+  ...REAL3D_STICKERS,
 ];
 
 export const STICKER_MAP: Record<string, StickerDef> = Object.fromEntries(STICKERS.map((s) => [s.id, s]));
@@ -1220,9 +1226,10 @@ export function drawStickers(ctx: CanvasRenderingContext2D, items: StickerItem[]
     const a = clamp((t - it.start) / 0.3, 0, 1) * clamp((it.end - t) / 0.3, 0, 1);
     ctx.save();
     ctx.filter = "none";
-    ctx.globalAlpha = a;
+    ctx.globalAlpha = a * clamp(it.alpha ?? 1, 0, 1);
     ctx.translate(it.x * W, it.y * H);
     if (it.rot) ctx.rotate((it.rot * Math.PI) / 180);
+    if (it.sx !== undefined || it.sy !== undefined) ctx.scale(clamp(it.sx ?? 1, 0.2, 4), clamp(it.sy ?? 1, 0.2, 4));
     def.draw(ctx, ((it.size / 100) * W) / 2, t - it.start);
     ctx.restore();
   }

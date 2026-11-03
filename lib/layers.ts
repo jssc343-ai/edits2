@@ -57,7 +57,7 @@ export function boundsOf(e: LayerEntry, W: number, H: number): Bounds {
   if (e.kind === "sticker") {
     const s = e.item as StickerItem;
     const side = Math.max(24, (s.size / 100) * W);
-    return { cx: s.x * W, cy: s.y * H, w: side, h: side, rot: s.rot ?? 0 };
+    return { cx: s.x * W, cy: s.y * H, w: side * (s.sx ?? 1), h: side * (s.sy ?? 1), rot: s.rot ?? 0 };
   }
   if (e.kind === "shape") {
     const s = e.item as ShapeItem;
@@ -73,7 +73,7 @@ export function boundsOf(e: LayerEntry, W: number, H: number): Bounds {
     measureCtx.font = `${spec.weight} ${px}px "${spec.family}", "Noto Sans TC", system-ui, sans-serif`;
     mw = Math.max(...lines.map((line) => Math.min(W * 0.94, measureCtx!.measureText(line).width)));
   }
-  return { cx: t.x * W, cy: t.y * H, w: mw + px * 0.4, h: lines.length * px * 1.25 + px * 0.1, rot: t.rot ?? 0 };
+  return { cx: t.x * W, cy: t.y * H, w: (mw + px * 0.4) * (t.sx ?? 1), h: (lines.length * px * 1.25 + px * 0.1) * (t.sy ?? 1), rot: t.rot ?? 0 };
 }
 
 export function hitTest(stack: LayerEntry[], W: number, H: number, px: number, py: number): LayerEntry | null {

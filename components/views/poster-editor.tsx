@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { Download, ImagePlus, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/components/lang-context";
 import { Chip, Nudge, Range, StickerPanel, SymbolPicker, TextPanel } from "@/components/editor-panels";
-import { DEFAULT_MAKEUP, drawText, fontSpec, makeupCss, type Makeup, type TextItem } from "@/lib/compositor";
+import { DEFAULT_MAKEUP, drawText, FONTS, fontSpec, makeupCss, type Makeup, type TextItem } from "@/lib/compositor";
 import { drawShapes, SHAPES, type ShapeItem } from "@/lib/shapes";
-import { drawStickers, type StickerItem } from "@/lib/stickers";
+import { drawStickers, STICKER_MAP, type StickerItem } from "@/lib/stickers";
+import { AiChatPanel, type AiAction } from "@/components/ai-chat-panel";
 import { ArtPanel } from "@/components/art-panel";
 import { buildGif } from "@/lib/gif";
 import { LifecycleBar, WorkSession, type WorkLifecycle } from "@/components/work-session";
@@ -21,7 +22,15 @@ import { boundsOf, buildStack, drawLayers, hitTest, moveLayer, nextZ, type Bound
 type Variant = "card" | "collage";
 type LayoutStyle = "grid" | "feature" | "side";
 type Rect = [number, number, number, number];
-type PosterAspect = "3:4" | "4:5" | "1:1" | "4:3" | "9:16" | "16:9";
+type PosterAspect = "3:4" | "4:5" | "1:1" | "4:3" | "9:16" | "16:9" | "2:3" | "3:2";
+
+export interface PosterInitial {
+  photos: { url: string; img: HTMLImageElement }[];
+  aspect: string;
+}
+
+const isHex = (c: string | null): c is string => !!c && /^#[0-9a-f]{3,8}$/i.test(c);
+const clampN = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 interface Photo {
   id: string;
@@ -41,6 +50,8 @@ const SIZES: Record<PosterAspect, { w: number; h: number }> = {
   "4:3": { w: 800, h: 600 },
   "9:16": { w: 450, h: 800 },
   "16:9": { w: 800, h: 450 },
+  "2:3": { w: 540, h: 810 },
+  "3:2": { w: 810, h: 540 },
 };
 
 const GRADIENTS: [string, string][] = [
@@ -224,22 +235,38 @@ function ColorSwatches({ value, onChange, label }: { value: string; onChange: (c
   );
 }
 
-export function PosterEditor({ variant }: { variant: Variant }) {
-  return <WorkSession>{(lifecycle) => <PosterEditorInner variant={variant} lifecycle={lifecycle} />}</WorkSession>;
+export function PosterEditor({ variant, initial, aiChat }: { variant: Variant; initial?: PosterInitial; aiChat?: boolean }) {
+  return (
+    <WorkSession>
+      {(lifecycle) => <PosterEditorInner variant={variant} lifecycle={lifecycle} initial={initial} aiChat={aiChat} />}
+    </WorkSession>
+  );
 }
 
-function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle: WorkLifecycle }) {
+function PosterEditorInner({
+  variant,
+  lifecycle,
+  initial,
+  aiChat,
+}: {
+  variant: Variant;
+  lifecycle: WorkLifecycle;
+  initial?: PosterInitial;
+  aiChat?: boolean;
+}) {
   const { L, lang } = useLang();
   const zh = lang === "zh-TW" || lang === "zh-CN";
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const maxPhotos = variant === "card" ? MAX_CARD : MAX_COLLAGE;
+  const maxPhotos = variant === "card" ? MAX_CARD : aiChat ? 9 : MAX_COLLAGE;
   const lock = useEditLock<PosterTab>(variant === "card" ? "bg" : "photos");
   const { tab, phase } = lock;
   const editing = phase === "editing";
-  const [aspect, setAspect] = useState<PosterAspect>("3:4");
+  const [aspect, setAspect] = useState<PosterAspect>(() => (initial && initial.aspect in SIZES ? (initial.aspect as PosterAspect) : "3:4"));
   const [gradient, setGradient] = useState(0);
-  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [photos, setPhotos] = useState<Photo[]>(() =>
+    (initial?.photos ?? []).slice(0, maxPhotos).map((p) => ({ id: uid(), img: p.img, url: p.url, zoom: 1, ox: 0, oy: 0, makeup: { ...DEFAULT_MAKEUP } })),
+  );
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [style, setStyle] = useState<LayoutStyle>("grid");
   const [gap, setGap] = useState(10);
@@ -266,6 +293,9 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
   const [selectedShape, setSelectedShape] = useState<string | null>(null);
 
   const [art, setArt] = useState<ArtState>(DEFAULT_ART);
+  const [manual, setManual] = useState(false);
+  const locked = !!aiChat && !manual;
+  const [aiSels, setAiSels] = useState<{ kind: "text" | "sticker" | "shape" | "photo"; id: string }[]>([]);
 
   const live = useRef<Live>({ variant, aspect, gradient, photos, style, gap, texts, stickers, shapes, art, hint: "" });
   live.current = {
@@ -273,15 +303,23 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
     hint: L("請先上傳相片", "Upload photos first"),
   };
 
+  const forceDraw = useRef(true);
+
   useEffect(() => {
     let raf = 0;
     const t0 = performance.now();
     let last = 0;
+    let lastDrawn: Live | null = null;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       if (document.hidden || now - last < 33) return;
+      const s = live.current;
+      const animated = !!s.art.comboType || s.art.borders.length > 0;
+      if (!animated && !forceDraw.current && s === lastDrawn) return;
       last = now;
-      if (canvasRef.current) drawPoster(canvasRef.current, live.current, (performance.now() - t0) / 1000);
+      lastDrawn = s;
+      forceDraw.current = false;
+      if (canvasRef.current) drawPoster(canvasRef.current, s, (performance.now() - t0) / 1000);
     };
     raf = requestAnimationFrame(loop);
     const state = live;
@@ -294,9 +332,184 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
   useEffect(() => {
     texts.forEach((item) => {
       const spec = fontSpec(item.font);
-      document.fonts.load(`${spec.weight} 40px "${spec.family}"`, item.text || "A").catch(() => {});
+      document.fonts
+        .load(`${spec.weight} 40px "${spec.family}"`, item.text || "A")
+        .then(() => {
+          forceDraw.current = true;
+        })
+        .catch(() => {});
     });
   }, [texts]);
+
+  const aiState = () => {
+    const s = live.current;
+    return {
+      aspect: s.aspect,
+      background: s.gradient,
+      layout: s.style,
+      gap: s.gap,
+      photoCount: s.photos.length,
+      texts: s.texts.map((t, i) => ({ n: i + 1, text: t.text, x: +t.x.toFixed(2), y: +t.y.toFixed(2), size: t.size, color: t.color, font: t.font, sx: t.sx ?? 1, sy: t.sy ?? 1, opacity: t.alpha ?? 1 })),
+      stickers: s.stickers.map((t, i) => ({ n: i + 1, kind: t.kind, x: +t.x.toFixed(2), y: +t.y.toFixed(2), size: t.size, sx: t.sx ?? 1, sy: t.sy ?? 1, opacity: t.alpha ?? 1 })),
+      shapes: s.shapes.map((t, i) => ({ n: i + 1, kind: t.kind, x: +t.x.toFixed(2), y: +t.y.toFixed(2), w: t.w, h: t.h, color: t.color, opacity: t.alpha ?? 1 })),
+    };
+  };
+
+  const applyActions = (list: AiAction[]) => {
+    const cur = live.current;
+    let nTexts = [...cur.texts];
+    let nStickers = [...cur.stickers];
+    let nShapes = [...cur.shapes];
+    let nPhotos = [...cur.photos];
+    const gone = new Set<string>();
+    const z = () => nextZ(nShapes, nStickers, nTexts);
+    const at = (i: number | null, len: number) => (i && i >= 1 && i <= len ? i - 1 : len - 1);
+    for (const a of list) {
+      switch (a.type) {
+        case "set_background":
+          if (a.gradient !== null) setGradient(clampN(Math.round(a.gradient), 0, GRADIENTS.length - 1));
+          break;
+        case "set_aspect":
+          if (a.aspect && a.aspect in SIZES) setAspect(a.aspect as PosterAspect);
+          break;
+        case "set_layout":
+          if (a.style) setStyle(a.style);
+          if (a.gap !== null) setGap(clampN(a.gap, 0, 40));
+          break;
+        case "add_text":
+          nTexts = [
+            ...nTexts,
+            {
+              id: uid(), text: (a.text ?? "").slice(0, 120), start: 0, end: 1e9,
+              x: clampN(a.x ?? 0.5, 0, 1), y: clampN(a.y ?? 0.5, 0, 1), size: clampN(a.size ?? 9, 3, 30),
+              color: isHex(a.color) ? a.color : "#ffffff",
+              font: FONTS.some((f) => f.family === a.font) ? (a.font as string) : "Noto Sans TC",
+              rot: a.rot ?? 0, z: z(),
+            },
+          ];
+          break;
+        case "update_text": {
+          const i = at(a.index, nTexts.length);
+          const t = nTexts[i];
+          if (!t) break;
+          nTexts[i] = {
+            ...t,
+            text: a.text !== null ? a.text.slice(0, 120) : t.text,
+            x: a.x !== null ? clampN(a.x, 0, 1) : t.x,
+            y: a.y !== null ? clampN(a.y, 0, 1) : t.y,
+            size: a.size !== null ? clampN(a.size, 3, 30) : t.size,
+            color: isHex(a.color) ? a.color : t.color,
+            font: FONTS.some((f) => f.family === a.font) ? (a.font as string) : t.font,
+            rot: a.rot !== null ? a.rot : t.rot,
+            sx: a.sx !== null ? clampN(a.sx, 0.2, 4) : t.sx,
+            sy: a.sy !== null ? clampN(a.sy, 0.2, 4) : t.sy,
+            alpha: a.opacity !== null ? clampN(a.opacity, 0.05, 1) : t.alpha,
+          };
+          break;
+        }
+        case "remove_text":
+          if (nTexts.length) gone.add(nTexts[at(a.index, nTexts.length)].id);
+          break;
+        case "remove_photo":
+          if (nPhotos.length) gone.add(nPhotos[at(a.index, nPhotos.length)].id);
+          break;
+        case "add_sticker":
+          if (a.kind && STICKER_MAP[a.kind])
+            nStickers = [
+              ...nStickers,
+              { id: uid(), kind: a.kind, x: clampN(a.x ?? 0.5, 0, 1), y: clampN(a.y ?? 0.5, 0, 1), size: clampN(a.size ?? 24, 8, 60), start: 0, end: 1e9, rot: a.rot ?? 0, z: z() },
+            ];
+          break;
+        case "update_sticker": {
+          const i = at(a.index, nStickers.length);
+          const t = nStickers[i];
+          if (!t) break;
+          nStickers[i] = {
+            ...t,
+            kind: a.kind && STICKER_MAP[a.kind] ? a.kind : t.kind,
+            x: a.x !== null ? clampN(a.x, 0, 1) : t.x,
+            y: a.y !== null ? clampN(a.y, 0, 1) : t.y,
+            size: a.size !== null ? clampN(a.size, 8, 60) : t.size,
+            rot: a.rot !== null ? a.rot : t.rot,
+            sx: a.sx !== null ? clampN(a.sx, 0.2, 4) : t.sx,
+            sy: a.sy !== null ? clampN(a.sy, 0.2, 4) : t.sy,
+            alpha: a.opacity !== null ? clampN(a.opacity, 0.05, 1) : t.alpha,
+          };
+          break;
+        }
+        case "remove_sticker":
+          if (nStickers.length) gone.add(nStickers[at(a.index, nStickers.length)].id);
+          break;
+        case "add_shape": {
+          const def = SHAPES.find((s) => s.id === a.kind);
+          if (!def) break;
+          nShapes = [
+            ...nShapes,
+            {
+              id: uid(), kind: def.id, x: clampN(a.x ?? 0.5, 0, 1), y: clampN(a.y ?? 0.5, 0, 1),
+              w: clampN(a.w ?? 40, 5, 100), h: clampN(a.h ?? (def.group === "line" ? 14 : 30), 3, 100), rot: a.rot ?? 0,
+              stroke: clampN(a.stroke ?? 2, 0.5, 10), color: isHex(a.color) ? a.color : "#ffffff",
+              fill: def.closed && isHex(a.fill) ? a.fill : null,
+              rows: clampN(Math.round(a.rows ?? 3), 1, 10), cols: clampN(Math.round(a.cols ?? 3), 1, 10), z: z(),
+            },
+          ];
+          break;
+        }
+        case "update_shape": {
+          const i = at(a.index, nShapes.length);
+          const t = nShapes[i];
+          if (!t) break;
+          nShapes[i] = {
+            ...t,
+            x: a.x !== null ? clampN(a.x, 0, 1) : t.x,
+            y: a.y !== null ? clampN(a.y, 0, 1) : t.y,
+            w: a.w !== null ? clampN(a.w, 5, 100) : t.w,
+            h: a.h !== null ? clampN(a.h, 3, 100) : t.h,
+            rot: a.rot !== null ? a.rot : t.rot,
+            stroke: a.stroke !== null ? clampN(a.stroke, 0.5, 10) : t.stroke,
+            color: isHex(a.color) ? a.color : t.color,
+            fill: a.fill === "none" ? null : isHex(a.fill) ? a.fill : t.fill,
+            rows: a.rows !== null ? clampN(Math.round(a.rows), 1, 10) : t.rows,
+            cols: a.cols !== null ? clampN(Math.round(a.cols), 1, 10) : t.cols,
+            alpha: a.opacity !== null ? clampN(a.opacity, 0.05, 1) : t.alpha,
+          };
+          break;
+        }
+        case "remove_shape":
+          if (nShapes.length) gone.add(nShapes[at(a.index, nShapes.length)].id);
+          break;
+        case "adjust_photo": {
+          const i = a.index && a.index >= 1 && a.index <= nPhotos.length ? a.index - 1 : 0;
+          const p = nPhotos[i];
+          if (!p) break;
+          nPhotos[i] = {
+            ...p,
+            zoom: a.zoom !== null ? clampN(a.zoom, 0.5, 3) : p.zoom,
+            makeup: {
+              ...p.makeup,
+              bright: a.bright !== null ? clampN(a.bright, 0.6, 1.5) : p.makeup.bright,
+              contrast: a.contrast !== null ? clampN(a.contrast, 0.6, 1.6) : p.makeup.contrast,
+              sat: a.sat !== null ? clampN(a.sat, 0, 2) : p.makeup.sat,
+              warm: a.warm !== null ? clampN(a.warm, -1, 1) : p.makeup.warm,
+            },
+          };
+          break;
+        }
+      }
+    }
+    if (gone.size) {
+      nPhotos.filter((p) => gone.has(p.id)).forEach((p) => URL.revokeObjectURL(p.url));
+      nTexts = nTexts.filter((x) => !gone.has(x.id));
+      nStickers = nStickers.filter((x) => !gone.has(x.id));
+      nShapes = nShapes.filter((x) => !gone.has(x.id));
+      nPhotos = nPhotos.filter((x) => !gone.has(x.id));
+      setAiSels([]);
+    }
+    setTexts(nTexts);
+    setStickers(nStickers);
+    setShapes(nShapes);
+    setPhotos(nPhotos);
+  };
 
   const onFiles = async (files: FileList | null) => {
     setMessage(null);
@@ -529,6 +742,74 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
     if (pr) frame = { cx: pr[0] + pr[2] / 2, cy: pr[1] + pr[3] / 2, w: pr[2], h: pr[3], rot: 0 };
   }
 
+  const aiPick = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * c.width;
+    const py = ((e.clientY - r.top) / r.height) * c.height;
+    const hit = hitTest(stack, c.width, c.height, px, py);
+    const toggle = (kind: "text" | "sticker" | "shape" | "photo", id: string) =>
+      setAiSels((prev) => (prev.some((s) => s.id === id) ? prev.filter((s) => s.id !== id) : [...prev, { kind, id }]));
+    if (hit) {
+      toggle(hit.kind === "text" ? "text" : hit.kind === "sticker" ? "sticker" : "shape", hit.id);
+      return;
+    }
+    for (let i = photos.length - 1; i >= 0; i--) {
+      const pr = photoRect(variant, photos.length, i, style, gap, c.width, c.height);
+      if (pr && px >= pr[0] && px <= pr[0] + pr[2] && py >= pr[1] && py <= pr[1] + pr[3]) {
+        toggle("photo", photos[i].id);
+        return;
+      }
+    }
+  };
+
+  const deleteIds = (ids: Set<string>) => {
+    if (!ids.size) return;
+    photos.filter((p) => ids.has(p.id)).forEach((p) => URL.revokeObjectURL(p.url));
+    setPhotos((prev) => prev.filter((p) => !ids.has(p.id)));
+    setTexts((prev) => prev.filter((x) => !ids.has(x.id)));
+    setStickers((prev) => prev.filter((x) => !ids.has(x.id)));
+    setShapes((prev) => prev.filter((x) => !ids.has(x.id)));
+    setAiSels([]);
+    setSelectedPhoto(null);
+    setSelectedText(null);
+    setSelectedSticker(null);
+    setSelectedShape(null);
+  };
+
+  const aiItems: { label: string; payload: unknown; frame: Bounds }[] = [];
+  for (const sel of aiSels) {
+    if (sel.kind === "photo") {
+      const i = photos.findIndex((p) => p.id === sel.id);
+      const pr = i >= 0 ? photoRect(variant, photos.length, i, style, gap, size.w, size.h) : null;
+      if (pr) aiItems.push({ label: L(`相片 ${i + 1}`, `Photo ${i + 1}`), payload: { element: "photo", index: i + 1 }, frame: { cx: pr[0] + pr[2] / 2, cy: pr[1] + pr[3] / 2, w: pr[2], h: pr[3], rot: 0 } });
+      continue;
+    }
+    const entry = stack.find((x) => x.id === sel.id);
+    if (!entry) continue;
+    const fr = boundsOf(entry, size.w, size.h);
+    if (sel.kind === "text") {
+      const i = texts.findIndex((x) => x.id === sel.id);
+      if (i >= 0) aiItems.push({ label: L(`文字 ${i + 1}「${texts[i].text.slice(0, 12)}」`, `Text ${i + 1} “${texts[i].text.slice(0, 12)}”`), payload: { element: "text", index: i + 1, text: texts[i].text }, frame: fr });
+    } else if (sel.kind === "sticker") {
+      const i = stickers.findIndex((x) => x.id === sel.id);
+      if (i >= 0) aiItems.push({ label: L(`貼圖 ${i + 1}`, `Sticker ${i + 1}`), payload: { element: "sticker", index: i + 1, kind: stickers[i].kind }, frame: fr });
+    } else {
+      const i = shapes.findIndex((x) => x.id === sel.id);
+      if (i >= 0) aiItems.push({ label: L(`圖形 ${i + 1}`, `Shape ${i + 1}`), payload: { element: "shape", index: i + 1, kind: shapes[i].kind }, frame: fr });
+    }
+  }
+  const aiSelected: { label: string; payload: unknown } | null = aiItems.length
+    ? aiItems.length === 1
+      ? aiItems[0]
+      : { label: aiItems.map((x) => x.label).join("、"), payload: { multiple: aiItems.map((x) => x.payload) } }
+    : null;
+  const frames: Bounds[] = locked ? aiItems.map((x) => x.frame) : frame ? [frame] : [];
+
+  const manualDeleteId =
+    activeId ?? (tab === "photos" && selectedPhoto && photos.some((p) => p.id === selectedPhoto) ? selectedPhoto : null);
+
   return (
     <div className="flex flex-col gap-4">
       <input
@@ -547,26 +828,27 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
         <div className="relative mx-auto w-fit max-w-full">
           <canvas
             ref={canvasRef}
-            onPointerDown={pickOnCanvas}
+            onPointerDown={locked ? aiPick : pickOnCanvas}
             className="block max-h-[34dvh] w-auto max-w-full cursor-pointer rounded-2xl bg-secondary"
             role="img"
             aria-label={variant === "card" ? L("文宣卡片預覽，點按物件可選取", "Promo card preview, tap an object to select") : L("相片組合預覽，點按物件可選取", "Collage preview, tap an object to select")}
           />
-          {frame && (
+          {frames.map((fr, i) => (
             <span
+              key={i}
               aria-hidden="true"
               className="pointer-events-none absolute rounded-sm border-2 border-dashed border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(255,255,255,0.85)]"
               style={{
-                left: `${((frame.cx - frame.w / 2) / size.w) * 100}%`,
-                top: `${((frame.cy - frame.h / 2) / size.h) * 100}%`,
-                width: `${(frame.w / size.w) * 100}%`,
-                height: `${(frame.h / size.h) * 100}%`,
-                transform: `rotate(${frame.rot}deg)`,
+                left: `${((fr.cx - fr.w / 2) / size.w) * 100}%`,
+                top: `${((fr.cy - fr.h / 2) / size.h) * 100}%`,
+                width: `${(fr.w / size.w) * 100}%`,
+                height: `${(fr.h / size.h) * 100}%`,
+                transform: `rotate(${fr.rot}deg)`,
               }}
             />
-          )}
+          ))}
         </div>
-        <LayerBar
+        {!locked && <LayerBar
           canFix={phase === "confirmed"}
           canConfirm={editing}
           onFix={lock.reopen}
@@ -576,8 +858,14 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
           canDown={activeIndex > 0}
           onUp={() => shiftLayer("up")}
           onDown={() => shiftLayer("down")}
-        />
-        {nudgeTarget && (
+        />}
+        {!locked && manualDeleteId && editing && (
+          <Button type="button" variant="outline" size="sm" className="h-10 self-center text-destructive" onClick={() => deleteIds(new Set([manualDeleteId]))}>
+            <Trash2 className="size-4" aria-hidden="true" />
+            {L("刪除選取的元件", "Delete selected item")}
+          </Button>
+        )}
+        {!locked && nudgeTarget && (
           <div inert={!editing} className={editing ? "" : "opacity-30 grayscale"}>
             <Nudge key={nudgeTarget.key} x={nudgeTarget.x} y={nudgeTarget.y} rot={nudgeTarget.rot} onMove={nudgeTarget.move} onRotate={nudgeTarget.rotate} />
           </div>
@@ -590,7 +878,11 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
         </p>
       )}
 
-      <div role="tablist" className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4">
+      {aiChat && (
+        <AiChatPanel variant={variant} selected={aiSelected} onClearSelected={() => setAiSels([])} onDeleteSelected={() => deleteIds(new Set(aiSels.map((s) => s.id)))} getState={aiState} onActions={applyActions} manualOpen={manual} onManual={() => startTransition(() => setManual((v) => !v))} />
+      )}
+
+      {!locked && <div role="tablist" className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -606,9 +898,9 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
             {label}
           </button>
         ))}
-      </div>
+      </div>}
 
-<EditLockPanel phase={phase}>
+{!locked && <EditLockPanel phase={phase}>
       {tab === "format" && <FormatPanel options={Object.keys(SIZES) as PosterAspect[]} value={aspect} onChange={setAspect} />}
 
       {tab === "bg" && backgroundPicker}
@@ -727,6 +1019,7 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
                 <Range label={L("高度", "Height")} value={shape.h} min={3} max={100} step={1} onChange={(v) => updateShape(shape.id, { h: v })} />
               )}
               <Range label={L("旋轉", "Rotate")} value={shape.rot} min={-180} max={180} step={5} suffix="°" onChange={(v) => updateShape(shape.id, { rot: v })} />
+              <Range label={L("透明度", "Opacity")} value={Math.round((shape.alpha ?? 1) * 100)} min={5} max={100} step={5} suffix="%" onChange={(v) => updateShape(shape.id, { alpha: v / 100 })} />
               {shape.kind === "table" && (
                 <>
                   <Range label={L("列數", "Rows")} value={shape.rows} min={1} max={10} step={1} onChange={(v) => updateShape(shape.id, { rows: v })} />
@@ -795,7 +1088,7 @@ function PosterEditorInner({ variant, lifecycle }: { variant: Variant; lifecycle
         />
       )}
 
-</EditLockPanel>
+</EditLockPanel>}
 
       <SaveDialog pending={pending} onClose={() => setPending(null)} />
       <LifecycleBar lifecycle={lifecycle} disabled={busy} />

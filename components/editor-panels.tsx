@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -419,6 +423,7 @@ export function TextPanel(p: TextProps) {
             )
           )}
           {!p.noNudge && <Nudge x={sel.x} y={sel.y} rot={sel.rot ?? 0} onMove={(x, y) => p.onUpdate(sel.id, { x, y })} onRotate={(r) => p.onUpdate(sel.id, { rot: r })} />}
+          <TuneControls sx={sel.sx} sy={sel.sy} alpha={sel.alpha} onChange={(patch) => p.onUpdate(sel.id, patch)} />
           <Range label={L("大小", "Size")} value={sel.size} min={3} max={32} step={1}
             onChange={(v) => p.onUpdate(sel.id, { size: v })} />
           <div className="flex flex-col gap-2">
@@ -799,6 +804,7 @@ export function StickerPanel(p: StickerProps) {
           {!p.noNudge && <Nudge x={sel.x} y={sel.y} rot={sel.rot ?? 0} onMove={(x, y) => p.onUpdate(sel.id, { x, y })} onRotate={(r) => p.onUpdate(sel.id, { rot: r })} />}
           <Range label={L("大小", "Size")} value={sel.size} min={6} max={70} step={1}
             onChange={(v) => p.onUpdate(sel.id, { size: v })} />
+          <TuneControls sx={sel.sx} sy={sel.sy} alpha={sel.alpha} onChange={(patch) => p.onUpdate(sel.id, patch)} />
           {!p.still && (
             <>
               <Range label={L("開始", "Start")} value={sel.start} min={0} max={max} step={0.5} suffix="s"
@@ -813,6 +819,63 @@ export function StickerPanel(p: StickerProps) {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+export function TuneControls({
+  sx,
+  sy,
+  alpha,
+  onChange,
+}: {
+  sx?: number;
+  sy?: number;
+  alpha?: number;
+  onChange: (patch: { sx?: number; sy?: number; alpha?: number }) => void;
+}) {
+  const { L } = useLang();
+  const x = sx ?? 1;
+  const y = sy ?? 1;
+  const bump = (dx: number, dy: number) =>
+    onChange({
+      sx: Math.min(4, Math.max(0.2, Math.round((x + dx) * 100) / 100)),
+      sy: Math.min(4, Math.max(0.2, Math.round((y + dy) * 100) / 100)),
+    });
+  const arrow = "size-11 rounded-xl border border-border bg-card text-foreground";
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-4">
+        <div className="grid grid-cols-3 gap-1" role="group" aria-label={L("拉伸與壓扁", "Stretch and squash")}>
+          <span />
+          <Button type="button" variant="ghost" className={arrow} aria-label={L("拉高", "Taller")} onClick={() => bump(0, 0.1)}>
+            <ArrowUp className="size-5" />
+          </Button>
+          <span />
+          <Button type="button" variant="ghost" className={arrow} aria-label={L("變窄", "Narrower")} onClick={() => bump(-0.1, 0)}>
+            <ArrowLeft className="size-5" />
+          </Button>
+          <Button type="button" variant="ghost" className="size-11 rounded-xl text-xs" aria-label={L("還原比例", "Reset shape")} onClick={() => onChange({ sx: 1, sy: 1 })}>
+            1:1
+          </Button>
+          <Button type="button" variant="ghost" className={arrow} aria-label={L("變寬", "Wider")} onClick={() => bump(0.1, 0)}>
+            <ArrowRight className="size-5" />
+          </Button>
+          <span />
+          <Button type="button" variant="ghost" className={arrow} aria-label={L("壓扁", "Squash")} onClick={() => bump(0, -0.1)}>
+            <ArrowDown className="size-5" />
+          </Button>
+          <span />
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {L("上下左右拉伸或壓扁,改變圖與文字的樣貌。", "Stretch or squash up, down, left, right to reshape the item.")}
+          <span className="mt-1 block tabular-nums">
+            {Math.round(x * 100)}% × {Math.round(y * 100)}%
+          </span>
+        </p>
+      </div>
+      <Range label={L("透明度", "Opacity")} value={Math.round((alpha ?? 1) * 100)} min={5} max={100} step={5} suffix="%"
+        onChange={(v) => onChange({ alpha: v / 100 })} />
     </div>
   );
 }

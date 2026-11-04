@@ -9,6 +9,7 @@ import {
   PenLine,
   Smile,
   Sparkles,
+  Wrench,
 } from "lucide-react";
 import { useLang } from "@/components/lang-context";
 import { FUNCS_AI, FUNCS_HAND, type EditFunc } from "@/lib/funcs";
@@ -26,6 +27,7 @@ const ICONS: Record<EditFunc, React.ReactNode> = {
   video: <Clapperboard className="size-5" aria-hidden="true" />,
   cutout: <Eraser className="size-5" aria-hidden="true" />,
   sticker: <Smile className="size-5" aria-hidden="true" />,
+  restore: <Wrench className="size-5" aria-hidden="true" />,
 };
 
 function Group({

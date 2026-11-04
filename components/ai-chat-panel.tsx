@@ -270,7 +270,8 @@ export function AiChatPanel<A = AiAction>({
             void send(input);
           }}
         >
-          {talk && <Button
+          {talk && (
+          <Button
             type="button"
             size="icon"
             variant={listening ? "default" : "outline"}
@@ -284,7 +285,8 @@ export function AiChatPanel<A = AiAction>({
             aria-label={listening ? L("停止聆聽", "Stop listening") : L("語音說話", "Speak")}
           >
             {listening ? <MicOff className="size-4" aria-hidden="true" /> : <Mic className="size-4" aria-hidden="true" />}
-          </Button>}
+          </Button>
+          )}
           <Input
             ref={inputRef}
             value={input}

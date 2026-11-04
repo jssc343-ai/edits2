@@ -31,6 +31,7 @@ export interface StageHandle {
   clear: () => void;
   exportMedia: (onProgress: (p: number) => void, signal: AbortSignal) => Promise<{ blob: Blob; ext: string }>;
   exportGif: (onProgress: (p: number) => void, signal: AbortSignal) => Promise<Blob>;
+  exportStill: () => Promise<Blob>;
 }
 
 interface Props {
@@ -274,6 +275,18 @@ export const MediaStage = forwardRef<StageHandle, Props>(function MediaStage(pro
       const id = currentClipId();
       if (id) strokesRef.current.set(id, []);
       dirtyRef.current = true;
+    },
+    exportStill: async () => {
+      const canvas = canvasRef.current;
+      const layers = layersRef.current;
+      const p = propsRef.current;
+      if (!canvas || !layers) throw new Error("not ready");
+      pause();
+      renderAt(canvas, layers, { ...p.project, fadeInOut: false }, p.assets.current, strokesRef.current, timeRef.current);
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/png"));
+      dirtyRef.current = true;
+      if (!blob) throw new Error("png failed");
+      return blob;
     },
     exportGif: async (onProgress, signal) => {
       const canvas = canvasRef.current;

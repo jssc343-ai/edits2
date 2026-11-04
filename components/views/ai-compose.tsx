@@ -46,7 +46,7 @@ function loadImage(url: string) {
 
 type Step = "materials" | "format" | "edit";
 
-export function AiCompose({ variant }: { variant: Variant }) {
+export function AiCompose({ variant, stillOnly }: { variant: Variant; stillOnly?: boolean }) {
   const { L } = useLang();
   const fileRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<Step>("materials");
@@ -213,6 +213,7 @@ export function AiCompose({ variant }: { variant: Variant }) {
         <PosterEditor
           variant={variant}
           aiChat
+          stillOnly={stillOnly}
           initial={{ photos: photos.map((p) => ({ url: p.url, img: p.img })), aspect: formatId }}
         />
       )}

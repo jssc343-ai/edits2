@@ -543,7 +543,7 @@ export function CutoutEditor({ mode, initialFile, autoAi, onUse, onCancel }: Pro
               {L("AI 一鍵去背（高精度）", "AI remove background (high accuracy)")}
             </Button>
           )}
-          <AiChatPanel<PhotoAction>
+          <AiChatPanel
             endpoint="/api/ai-photo"
             extraBody={{ kind: "cutout" }}
             getState={getAiState}

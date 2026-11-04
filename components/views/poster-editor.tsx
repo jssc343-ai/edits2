@@ -235,10 +235,10 @@ function ColorSwatches({ value, onChange, label }: { value: string; onChange: (c
   );
 }
 
-export function PosterEditor({ variant, initial, aiChat }: { variant: Variant; initial?: PosterInitial; aiChat?: boolean }) {
+export function PosterEditor({ variant, initial, aiChat, stillOnly }: { variant: Variant; initial?: PosterInitial; aiChat?: boolean; stillOnly?: boolean }) {
   return (
     <WorkSession>
-      {(lifecycle) => <PosterEditorInner variant={variant} lifecycle={lifecycle} initial={initial} aiChat={aiChat} />}
+      {(lifecycle) => <PosterEditorInner variant={variant} lifecycle={lifecycle} initial={initial} aiChat={aiChat} stillOnly={stillOnly} />}
     </WorkSession>
   );
 }
@@ -248,11 +248,13 @@ function PosterEditorInner({
   lifecycle,
   initial,
   aiChat,
+  stillOnly = false,
 }: {
   variant: Variant;
   lifecycle: WorkLifecycle;
   initial?: PosterInitial;
   aiChat?: boolean;
+  stillOnly?: boolean;
 }) {
   const { L, lang } = useLang();
   const zh = lang === "zh-TW" || lang === "zh-CN";
@@ -598,7 +600,7 @@ function PosterEditorInner({
   };
 
   const download = () => {
-    if (fmt === "gif") {
+    if (fmt === "gif" && !stillOnly) {
       void downloadGif();
       return;
     }
@@ -848,17 +850,19 @@ function PosterEditorInner({
             />
           ))}
         </div>
-        {!locked && <LayerBar
-          canFix={phase === "confirmed"}
-          canConfirm={editing}
-          onFix={lock.reopen}
-          onConfirm={lock.confirm}
-          hasTarget={activeId !== null && editing}
-          canUp={activeIndex >= 0 && activeIndex < stack.length - 1}
-          canDown={activeIndex > 0}
-          onUp={() => shiftLayer("up")}
-          onDown={() => shiftLayer("down")}
-        />}
+        {!locked && (
+          <LayerBar
+            canFix={phase === "confirmed"}
+            canConfirm={editing}
+            onFix={lock.reopen}
+            onConfirm={lock.confirm}
+            hasTarget={activeId !== null && editing}
+            canUp={activeIndex >= 0 && activeIndex < stack.length - 1}
+            canDown={activeIndex > 0}
+            onUp={() => shiftLayer("up")}
+            onDown={() => shiftLayer("down")}
+          />
+        )}
         {!locked && manualDeleteId && editing && (
           <Button type="button" variant="outline" size="sm" className="h-10 self-center text-destructive" onClick={() => deleteIds(new Set([manualDeleteId]))}>
             <Trash2 className="size-4" aria-hidden="true" />
@@ -882,7 +886,8 @@ function PosterEditorInner({
         <AiChatPanel variant={variant} selected={aiSelected} onClearSelected={() => setAiSels([])} onDeleteSelected={() => deleteIds(new Set(aiSels.map((s) => s.id)))} getState={aiState} onActions={applyActions} manualOpen={manual} onManual={() => startTransition(() => setManual((v) => !v))} />
       )}
 
-      {!locked && <div role="tablist" className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4">
+      {!locked && (
+      <div role="tablist" className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -898,9 +903,11 @@ function PosterEditorInner({
             {label}
           </button>
         ))}
-      </div>}
+      </div>
+      )}
 
-{!locked && <EditLockPanel phase={phase}>
+      {!locked && (
+      <EditLockPanel phase={phase}>
       {tab === "format" && <FormatPanel options={Object.keys(SIZES) as PosterAspect[]} value={aspect} onChange={setAspect} />}
 
       {tab === "bg" && backgroundPicker}
@@ -1088,11 +1095,13 @@ function PosterEditorInner({
         />
       )}
 
-</EditLockPanel>}
+</EditLockPanel>
+      )}
 
       <SaveDialog pending={pending} onClose={() => setPending(null)} />
       <LifecycleBar lifecycle={lifecycle} disabled={busy} />
 
+      {!stillOnly && (
       <div className="grid grid-cols-2 gap-2" role="group" aria-label={L("輸出方式", "Output")}>
         <Button type="button" variant={fmt === "orig" ? "default" : "outline"} className="h-auto flex-col gap-0.5 py-2" onClick={() => setFmt("orig")} aria-pressed={fmt === "orig"}>
           <span>{L("保持原創", "Keep original")}</span>
@@ -1103,16 +1112,17 @@ function PosterEditorInner({
           <span className="text-xs font-normal opacity-80">{L("自動重複播放", "Loops automatically")}</span>
         </Button>
       </div>
+      )}
       <Button className="h-12" onClick={download} disabled={busy || (variant === "collage" && photos.length === 0)}>
         <Download className="size-4" aria-hidden="true" />
         {busy
           ? L("正在製作 GIF…", "Making GIF...")
-          : fmt === "gif"
+          : fmt === "gif" && !stillOnly
             ? L("下載 GIF · 測試期免費", "Download GIF - free during testing")
             : L("下載圖片 · 測試期免費", "Download image - free during testing")}
       </Button>
       <p className="text-center text-xs text-muted-foreground">
-        {fmt === "gif"
+        {fmt === "gif" && !stillOnly
           ? L("GIF 約 3 秒，會自動循環播放，檔案較小、色彩較簡化。成果不會保存。", "The GIF is about 3 seconds and loops forever. Colors are simplified. Nothing is saved.")
           : L("動態插圖會以下載當下的畫面輸出。成果不會保存。", "Animated artwork is captured as it looks at download. Nothing is saved.")}
       </p>

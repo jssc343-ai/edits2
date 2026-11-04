@@ -13,6 +13,7 @@ import { AiCompose } from "@/components/views/ai-compose";
 import { PayView } from "@/components/views/pay-view";
 import { CutoutEditor } from "@/components/views/cutout-editor";
 import { StickerEditor } from "@/components/views/sticker-editor";
+import { RestoreEditor } from "@/components/views/restore-editor";
 import { WalletProvider } from "@/components/wallet-context";
 import { FUNCS_AI, FUNCS_HAND, type EditFunc } from "@/lib/funcs";
 import { translate, type LangCode } from "@/lib/i18n-editor";
@@ -35,6 +36,7 @@ function AppShellInner() {
   const [view, setView] = useState<View>("select");
   const [func, setFunc] = useState<EditFunc | null>(null);
   const [mode, setMode] = useState<EditMode | null>(null);
+  const [stillOnly, setStillOnly] = useState(false);
 
   const ctx = useMemo(() => {
     const zh = lang === "zh-TW" || lang === "zh-CN";
@@ -52,6 +54,7 @@ function AppShellInner() {
   const pick = (m: EditMode, f: EditFunc) => {
     setMode(m);
     setFunc(f);
+    setStillOnly(false);
     setView("editor");
   };
 
@@ -99,12 +102,39 @@ function AppShellInner() {
         <main className="flex-1 px-4 py-5">
           {view === "pay" && <PayView />}
           {view === "select" && <SelectView onPick={pick} />}
-          {view === "editor" && (func === "card" || func === "collage") && mode === "ai" && <AiCompose key={`${func}-ai`} variant={func} />}
-          {view === "editor" && (func === "card" || func === "collage") && mode === "hand" && <PosterEditor key={`${func}-hand`} variant={func} />}
+          {view === "editor" && (func === "card" || func === "collage" || func === "single") && (
+            <div className="mb-4 grid grid-cols-2 gap-2" role="group" aria-label={ctx.L("編輯類型", "Edit type")}>
+              <Button
+                type="button"
+                variant={stillOnly ? "default" : "outline"}
+                className="h-auto flex-col gap-0.5 py-2"
+                onClick={() => setStillOnly(true)}
+                aria-pressed={stillOnly}
+              >
+                <span>{ctx.L("純照片編輯", "Photo only")}</span>
+                <span className="text-xs font-normal opacity-80">{ctx.L("輸出靜態 PNG 圖片", "Export a still PNG")}</span>
+              </Button>
+              <Button
+                type="button"
+                variant={!stillOnly ? "default" : "outline"}
+                className="h-auto flex-col gap-0.5 py-2"
+                onClick={() => setStillOnly(false)}
+                aria-pressed={!stillOnly}
+              >
+                <span>{ctx.L("短片動態編輯", "Short clip")}</span>
+                <span className="text-xs font-normal opacity-80">{ctx.L("動態、GIF 或影片", "Motion, GIF or video")}</span>
+              </Button>
+            </div>
+          )}
+          {view === "editor" && (func === "card" || func === "collage") && mode === "ai" && <AiCompose key={`${func}-ai`} variant={func} stillOnly={stillOnly} />}
+          {view === "editor" && (func === "card" || func === "collage") && mode === "hand" && <PosterEditor key={`${func}-hand`} variant={func} stillOnly={stillOnly} />}
           {view === "editor" && func === "cutout" && mode && <CutoutEditor key={`cutout-${mode}`} mode={mode} />}
           {view === "editor" && func === "sticker" && mode && <StickerEditor key={`sticker-${mode}`} mode={mode} />}
+          {view === "editor" && func === "restore" && mode && (
+            <RestoreEditor key={`restore-${mode}`} mode={mode} onOpenPay={() => setView("pay")} />
+          )}
           {view === "editor" && (func === "single" || func === "photos" || func === "video") && mode && (
-            <EditorView key={`${func}-${mode}`} func={func} mode={mode} onOpenPay={() => setView("pay")} />
+            <EditorView key={`${func}-${mode}`} func={func} mode={mode} onOpenPay={() => setView("pay")} stillOnly={func === "single" ? stillOnly : false} />
           )}
         </main>
       </div>

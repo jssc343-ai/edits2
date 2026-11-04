@@ -366,7 +366,7 @@ export function StickerEditor({ mode }: { mode: EditMode }) {
       </div>
 
       {mode === "ai" && (
-        <AiChatPanel<PhotoAction>
+        <AiChatPanel
           endpoint="/api/ai-photo"
           extraBody={{ kind: "sticker" }}
           selected={

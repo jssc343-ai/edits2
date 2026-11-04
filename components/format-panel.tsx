@@ -8,6 +8,7 @@ const HINTS: Record<string, [string, string]> = {
   "1:1": ["正方形頭像、貼文", "Square post, avatar"],
   "2:3": ["海報、明信片", "Poster, postcard"],
   "4:3": ["橫式相片", "Landscape photo"],
+  "3:2": ["橫式海報、相機照片", "Landscape poster, camera photo"],
   "9:16": ["限時動態、短影片", "Stories, short video"],
   "16:9": ["橫式影片、螢幕", "Widescreen video"],
 };

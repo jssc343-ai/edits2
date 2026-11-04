@@ -2,7 +2,8 @@
 
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { LifecycleBar, WorkSession, type WorkLifecycle } from "@/components/work-session";
-import { Download, ImagePlus, Pause, Play, RefreshCw, Sparkles, X } from "lucide-react";
+import { Download, ImagePlus, Pause, Play, Plus, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { SHAPES, type ShapeItem } from "@/lib/shapes";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -19,7 +20,7 @@ import {
 } from "@/components/editor-panels";
 import { DirectorTools } from "@/components/director-tools";
 import { FramePanel, LifePanel, MakeupPanel } from "@/components/photo-tools";
-import { Nudge, Range } from "@/components/editor-panels";
+import { Chip, Nudge, Range, SymbolPicker } from "@/components/editor-panels";
 import { useLang } from "@/components/lang-context";
 import {
   MAX_PHOTOS as HAND_MAX_PHOTOS,
@@ -54,7 +55,32 @@ import { renderSfxTrack, type SfxItem } from "@/lib/sfx";
 import { useWallet } from "@/components/wallet-context";
 import type { EditMode } from "@/components/app-shell";
 
-type Tab = "format" | "art" | "clips" | "frame" | "makeup" | "life" | "wear" | "scene" | "trans" | "text" | "stickers" | "music" | "sfx" | "special";
+type Tab = "format" | "art" | "clips" | "frame" | "makeup" | "life" | "wear" | "scene" | "trans" | "text" | "stickers" | "music" | "sfx" | "special" | "shapes" | "symbols";
+
+const ASPECTS_6: Aspect[] = ["9:16", "3:4", "4:5", "1:1", "4:3", "16:9"];
+const ASPECTS_8: Aspect[] = [...ASPECTS_6, "2:3", "3:2"];
+const SWATCHES = ["#ffffff", "#000000", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
+
+function Swatches({ label, value, onChange }: { label: string; value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-medium">{label}</span>
+      <div className="flex flex-wrap gap-2">
+        {SWATCHES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-label={c}
+            aria-pressed={value === c}
+            onClick={() => onChange(c)}
+            style={{ backgroundColor: c }}
+            className={`size-8 rounded-full border border-border ${value === c ? "ring-2 ring-primary ring-offset-2" : ""}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -118,7 +144,7 @@ function makeThumb(el: HTMLImageElement | HTMLVideoElement) {
   return c.toDataURL("image/jpeg", 0.6);
 }
 
-export function EditorView(props: { func: EditFunc; mode: EditMode; onOpenPay: () => void }) {
+export function EditorView(props: { func: EditFunc; mode: EditMode; onOpenPay: () => void; initialFile?: File; initialAspect?: Aspect; stillOnly?: boolean }) {
   if (props.func !== "single") return <EditorViewInner {...props} lifecycle={null} />;
   return <WorkSession>{(lifecycle) => <EditorViewInner {...props} lifecycle={lifecycle} />}</WorkSession>;
 }
@@ -128,11 +154,17 @@ function EditorViewInner({
   mode,
   onOpenPay,
   lifecycle,
+  initialFile,
+  initialAspect,
+  stillOnly = false,
 }: {
   func: EditFunc;
   mode: EditMode;
   onOpenPay: () => void;
   lifecycle: WorkLifecycle | null;
+  initialFile?: File;
+  initialAspect?: Aspect;
+  stillOnly?: boolean;
 }) {
   const { L, t } = useLang();
   const wallet = useWallet();
@@ -158,8 +190,10 @@ function EditorViewInner({
   const [texts, setTexts] = useState<TextItem[]>([]);
   const [stickers, setStickers] = useState<StickerItem[]>([]);
   const [selectedSticker, setSelectedSticker] = useState<string | null>(null);
+  const [shapes, setShapes] = useState<ShapeItem[]>([]);
+  const [selectedShape, setSelectedShape] = useState<string | null>(null);
   const [art, setArt] = useState<ArtState>(DEFAULT_ART);
-  const [aspect, setAspect] = useState<Aspect>("9:16");
+  const [aspect, setAspect] = useState<Aspect>(initialAspect ?? "9:16");
   const [fadeInOut, setFadeInOut] = useState(true);
   const [templateId, setTemplateId] = useState(MOTION_TEMPLATES[0].id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -228,8 +262,9 @@ function EditorViewInner({
       fadeInOut,
       stickers,
       art: func === "single" ? art : undefined,
+      shapes: func === "single" ? shapes : undefined,
     }),
-    [clips, texts, aspect, mode, templateId, fadeInOut, stickers, art, func],
+    [clips, texts, aspect, mode, templateId, fadeInOut, stickers, art, func, shapes],
   );
   const total = useMemo(() => buildTimeline(clips).total, [clips]);
 
@@ -257,7 +292,15 @@ function EditorViewInner({
     });
   }, [texts]);
 
-  const addFiles = async (files: FileList | null) => {
+  const initialLoaded = useRef(false);
+  useEffect(() => {
+    if (!initialFile || initialLoaded.current) return;
+    initialLoaded.current = true;
+    void addFiles([initialFile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
+
+  const addFiles = async (files: FileList | File[] | null) => {
     if (!files || !files.length) return;
     setLoading(true);
     setMessage(null);
@@ -424,21 +467,23 @@ function EditorViewInner({
   };
 
   const addText = (role: TextRole = "body") => {
-    const base = { id: uid(), x: 0.5, color: "#ffffff", font: "Noto Sans TC", z: nextZ([], stickers, texts) };
+    const base = { id: uid(), x: 0.5, color: "#ffffff", font: "Noto Sans TC", z: nextZ(shapes, stickers, texts) };
     const item: TextItem =
       role === "opening"
         ? { ...base, text: L("我的故事", "My story"), start: 0, end: 3, y: 0.5, size: 12, role }
         : role === "closing"
           ? { ...base, text: L("謝謝觀看", "Thanks for watching"), start: Math.max(0, total - 3), end: Math.max(3, total), y: 0.5, size: 12, role }
-          : { ...base, text: L("美好回憶", "Beautiful memories"), start: Math.floor(time), end: Math.floor(time) + 3, y: 0.8, size: 9, role };
+          : stillOnly
+            ? { ...base, text: L("美好回憶", "Beautiful memories"), start: 0, end: Math.max(3, Math.ceil(total)), y: 0.8, size: 9, role }
+            : { ...base, text: L("美好回憶", "Beautiful memories"), start: Math.floor(time), end: Math.floor(time) + 3, y: 0.8, size: 9, role };
     setTexts((prev) => [...prev, item]);
     setSelectedText(item.id);
   };
 
   const addSticker = (stickerKind: string) => {
     const item: StickerItem = {
-      id: uid(), kind: stickerKind, x: 0.5, y: 0.4, size: 24, z: nextZ([], stickers, texts),
-      start: Math.floor(time), end: Math.max(Math.floor(time) + 4, Math.ceil(total)),
+      id: uid(), kind: stickerKind, x: 0.5, y: 0.4, size: 24, z: nextZ(shapes, stickers, texts),
+      start: stillOnly ? 0 : Math.floor(time), end: Math.max((stillOnly ? 0 : Math.floor(time)) + 4, Math.ceil(total)),
     };
     setStickers((prev) => [...prev, item]);
     setSelectedSticker(item.id);
@@ -499,9 +544,11 @@ function EditorViewInner({
     setMessage(null);
     try {
       const { blob, ext } =
-        func === "single" && outFmt === "gif"
-          ? { blob: await stageRef.current.exportGif(setProgress, ctrl.signal), ext: "gif" }
-          : await stageRef.current.exportMedia(setProgress, ctrl.signal);
+        func === "single" && stillOnly
+          ? { blob: await stageRef.current.exportStill(), ext: "png" }
+          : func === "single" && outFmt === "gif"
+            ? { blob: await stageRef.current.exportGif(setProgress, ctrl.signal), ext: "gif" }
+            : await stageRef.current.exportMedia(setProgress, ctrl.signal);
       const paid = FREE_TESTING ? true : await wallet.spend(cost);
       if (!paid) {
         setMessage(L(`點數不足，本次需要 ${cost} 點。`, `Not enough points. This creation needs ${cost}.`));
@@ -522,7 +569,7 @@ function EditorViewInner({
 
   const { lang } = useLang();
   const aiGuided = mode === "ai";
-  const [aiStage, setAiStage] = useState<"pick" | "format" | "done">("pick");
+  const [aiStage, setAiStage] = useState<"pick" | "format" | "done">(initialFile ? "done" : "pick");
   const [aiClipIds, setAiClipIds] = useState<string[]>([]);
   const toggleAiClip = (id: string) => setAiClipIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const boxedClips = clips.filter((c) => aiClipIds.includes(c.id));
@@ -581,7 +628,7 @@ function EditorViewInner({
     setAiBusy(false);
   };
 
-  const [manual, setManual] = useState(false);
+  const [manual, setManual] = useState(!!initialFile);
   const showManual = !aiGuided || manual;
 
   const showState = () => ({
@@ -602,7 +649,7 @@ function EditorViewInner({
           void runAi();
           break;
         case "set_aspect":
-          if (a.value && ["9:16", "3:4", "4:5", "1:1", "4:3", "16:9"].includes(a.value)) setAspect(a.value as Aspect);
+          if (a.value && ASPECTS_8.includes(a.value as Aspect)) setAspect(a.value as Aspect);
           break;
         case "set_motion": {
           const m = MOTION_TEMPLATES.find((x) => x.id === a.value);
@@ -637,7 +684,7 @@ function EditorViewInner({
             start,
             end: num(a.end, start + 1, 7200) ?? start + 4,
             role: "body",
-            z: nextZ([], stickers, texts),
+            z: nextZ(shapes, stickers, texts),
           };
           setTexts((prev) => [...prev, item]);
           break;
@@ -679,7 +726,7 @@ function EditorViewInner({
             size: num(a.size, 8, 60) ?? 24,
             start,
             end: num(a.end, start + 1, 7200) ?? Math.max(start + 4, Math.ceil(total)),
-            z: nextZ([], stickers, texts),
+            z: nextZ(shapes, stickers, texts),
           };
           setStickers((prev) => [...prev, item]);
           break;
@@ -729,7 +776,8 @@ function EditorViewInner({
     }
   };
 
-  const tabs: [Tab, string][] = [
+  const videoOnlyTabs: Tab[] = ["life", "music", "sfx"];
+  const allTabs: [Tab, string][] = [
     ["format", L("格式", "Format")],
     ["clips", kind === "photo" ? L("相片", "Photos") : L("素材", "Clips")],
     ["frame", L("剪輯", "Crop")],
@@ -738,24 +786,58 @@ function EditorViewInner({
       ? ([["life", L("動態", "Motion")], ["wear", L("AI 變裝", "Outfit")], ["scene", L("AI 景觀", "Scenery")]] as [Tab, string][])
       : ([["trans", L("轉場", "Transitions")]] as [Tab, string][])),
     ["text", L("文字", "Text")],
-    ...(func === "single" ? ([["art", L("藝術套件", "Art kit")]] as [Tab, string][]) : []),
+    ...(func === "single"
+      ? ([["art", L("藝術套件", "Art kit")], ["shapes", L("圖形線條", "Shapes")], ["symbols", L("符號", "Symbols")]] as [Tab, string][])
+      : []),
     ["stickers", L("插圖", "Artwork")],
     ["music", L("音樂", "Music")],
     ["sfx", L("配音", "Sound FX")],
-    ["special", mode === "hand" ? L("手繪", "Draw") : L("AI 3D 動態", "AI 3D")],
+    ...(stillOnly && mode !== "hand" ? [] : ([["special", mode === "hand" ? L("手繪", "Draw") : L("AI 3D 動態", "AI 3D")]] as [Tab, string][])),
   ];
+  const tabs = stillOnly ? allTabs.filter(([id]) => !videoOnlyTabs.includes(id)) : allTabs;
 
   const overLimit = kind === "video" && total > MAX_TIMELINE;
 
   const textTarget = tab === "text" ? texts.find((x) => x.id === selectedText) : undefined;
   const stickerTarget = ["stickers", "life", "wear", "scene"].includes(tab) ? stickers.find((x) => x.id === selectedSticker) : undefined;
-  const nudgeItem = textTarget ?? stickerTarget;
+  const shapeTarget = tab === "shapes" ? shapes.find((x) => x.id === selectedShape) : undefined;
+  const nudgeItem = textTarget ?? stickerTarget ?? shapeTarget;
   const updateNudged = (patch: { x?: number; y?: number; rot?: number }) => {
     if (textTarget) setTexts((prev) => prev.map((x) => (x.id === textTarget.id ? { ...x, ...patch } : x)));
     else if (stickerTarget) setStickers((prev) => prev.map((x) => (x.id === stickerTarget.id ? { ...x, ...patch } : x)));
+    else if (shapeTarget) setShapes((prev) => prev.map((x) => (x.id === shapeTarget.id ? { ...x, ...patch } : x)));
   };
 
-  const stack = buildStack([], stickers, texts);
+  const addShape = (kind: string) => {
+    const def = SHAPES.find((s) => s.id === kind);
+    const item: ShapeItem = {
+      id: uid(), kind, x: 0.5, y: 0.5, w: 40, h: def?.group === "line" ? 14 : 30, rot: 0,
+      stroke: 2, color: "#ffffff", fill: null, rows: 3, cols: 3, z: nextZ(shapes, stickers, texts),
+    };
+    setShapes((prev) => [...prev, item]);
+    setSelectedShape(item.id);
+  };
+  const updateShape = (id: string, patch: Partial<ShapeItem>) => setShapes((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+
+  const pickSymbol = (s: string) => {
+    const cur = texts.find((x) => x.id === selectedText);
+    if (cur) {
+      setTexts((prev) => prev.map((x) => (x.id === cur.id ? { ...x, text: (x.text + s).slice(0, 120) } : x)));
+      return;
+    }
+    const item: TextItem = {
+      id: uid(), text: s, x: 0.5, y: 0.6, size: 12, color: "#ffffff", font: "Noto Sans TC",
+      start: stillOnly ? 0 : Math.floor(time), end: Math.max((stillOnly ? 0 : Math.floor(time)) + 4, Math.ceil(total)), role: "body", z: nextZ(shapes, stickers, texts),
+    };
+    setTexts((prev) => [...prev, item]);
+    setSelectedText(item.id);
+  };
+
+  const aspectOptions = func === "single" ? ASPECTS_8 : ASPECTS_6;
+  const shapeDef = shapeTarget ? SHAPES.find((s) => s.id === shapeTarget.kind) : undefined;
+  const straight = ["line", "dashed", "dotted", "arrow", "arrow2"];
+
+  const stack = buildStack(shapes, stickers, texts);
   const activeId = nudgeItem?.id ?? null;
   const activeIndex = activeId ? stack.findIndex((e) => e.id === activeId) : -1;
   const shiftLayer = (dir: "up" | "down") => {
@@ -764,6 +846,7 @@ function EditorViewInner({
     if (!map) return;
     setStickers((prev) => prev.map((s) => ({ ...s, z: map.get(s.id) ?? s.z })));
     setTexts((prev) => prev.map((s) => ({ ...s, z: map.get(s.id) ?? s.z })));
+    setShapes((prev) => prev.map((s) => ({ ...s, z: map.get(s.id) ?? s.z })));
   };
 
   return (
@@ -814,17 +897,19 @@ function EditorViewInner({
         )}
       </div>
 
-      {showManual && <LayerBar
-        canFix={phase === "confirmed"}
-        canConfirm={editing}
-        onFix={lock.reopen}
-        onConfirm={lock.confirm}
-        hasTarget={activeId !== null && editing}
-        canUp={activeIndex >= 0 && activeIndex < stack.length - 1}
-        canDown={activeIndex > 0}
-        onUp={() => shiftLayer("up")}
-        onDown={() => shiftLayer("down")}
-      />}
+      {showManual && (
+        <LayerBar
+          canFix={phase === "confirmed"}
+          canConfirm={editing}
+          onFix={lock.reopen}
+          onConfirm={lock.confirm}
+          hasTarget={activeId !== null && editing}
+          canUp={activeIndex >= 0 && activeIndex < stack.length - 1}
+          canDown={activeIndex > 0}
+          onUp={() => shiftLayer("up")}
+          onDown={() => shiftLayer("down")}
+        />
+      )}
       {showManual && nudgeItem && (
         <div inert={!editing} className={editing ? "" : "opacity-30 grayscale"}>
           <Nudge
@@ -839,7 +924,7 @@ function EditorViewInner({
       )}
       </div>
 
-      {clips.length > 0 && (
+      {clips.length > 0 && !stillOnly && (
         <div className="flex items-center gap-3">
           <Button variant="secondary" size="icon" className="size-11 shrink-0" aria-label={playing ? t("pause") : t("preview")} onClick={() => stageRef.current?.toggle()}>
             {playing ? <Pause className="size-5" /> : <Play className="size-5" />}
@@ -925,7 +1010,7 @@ function EditorViewInner({
           {aiStage === "format" && (
             <>
               <h3 className="text-sm font-semibold">{L("第 2 步：選定螢幕格式", "Step 2: Choose a screen format")}</h3>
-              <FormatPanel options={["9:16", "3:4", "4:5", "1:1", "4:3", "16:9"] as Aspect[]} value={aspect} onChange={setAspect} />
+              <FormatPanel options={aspectOptions} value={aspect} onChange={setAspect} />
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setAiStage("pick")}>
                   {L("上一步", "Back")}
@@ -963,7 +1048,7 @@ function EditorViewInner({
                   ))}
                 </div>
               )}
-              <AiChatPanel<ShowAction>
+              <AiChatPanel
                 selected={
                   boxedClips.length
                     ? {
@@ -998,7 +1083,8 @@ function EditorViewInner({
         </div>
       )}
 
-      {showManual && <div role="tablist" className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4">
+      {showManual && (
+      <div role="tablist" className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -1014,9 +1100,11 @@ function EditorViewInner({
             {label}
           </button>
         ))}
-      </div>}
+      </div>
+      )}
 
-{showManual && <EditLockPanel phase={phase}>
+      {showManual && (
+      <EditLockPanel phase={phase}>
       {tab === "clips" && (func === "photos" || func === "video") && clips.length > 1 && (
         <DirectorTools
           kind={kind}
@@ -1048,7 +1136,7 @@ function EditorViewInner({
         />
       )}
       {tab === "format" && (
-        <FormatPanel options={["9:16", "3:4", "4:5", "1:1", "4:3", "16:9"] as Aspect[]} value={aspect} onChange={setAspect} />
+        <FormatPanel options={aspectOptions} value={aspect} onChange={setAspect} />
       )}
 
       {tab === "frame" && <FramePanel clip={clips.find((c) => c.id === selectedId)} onUpdate={(p) => selectedId && updateClip(selectedId, p)} />}
@@ -1060,8 +1148,8 @@ function EditorViewInner({
           onApplyAll={func === "single" ? undefined : (m) => setClips((prev) => prev.map((c) => ({ ...c, makeup: m })))}
         />
       )}
-      {tab === "life" && <LifePanel clip={clips.find((c) => c.id === selectedId)} onUpdate={(p) => selectedId && updateClip(selectedId, p)} />}
-      {tab === "life" && (
+      {tab === "life" && !stillOnly && <LifePanel clip={clips.find((c) => c.id === selectedId)} onUpdate={(p) => selectedId && updateClip(selectedId, p)} />}
+      {tab === "life" && !stillOnly && (
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">{L("環境動態", "Atmosphere effects")}</h3>
           <p className="text-xs text-muted-foreground">
@@ -1072,6 +1160,7 @@ function EditorViewInner({
             selectedId={selectedSticker}
             total={total}
             cat="atmo"
+            still={stillOnly}
             noNudge
             onAdd={addSticker}
             onSelect={setSelectedSticker}
@@ -1095,6 +1184,7 @@ function EditorViewInner({
             selectedId={selectedSticker}
             total={total}
             cat={tab === "wear" ? "wear" : "scene"}
+            still={stillOnly}
             noNudge
             onAdd={addSticker}
             onSelect={setSelectedSticker}
@@ -1136,7 +1226,7 @@ function EditorViewInner({
           total={total}
           onSelect={setSelectedText}
           onAdd={addText}
-          still={false}
+          still={stillOnly}
           noNudge
           onUpdate={(id, patch) => setTexts((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)))}
           onRemove={(id) => {
@@ -1146,11 +1236,79 @@ function EditorViewInner({
         />
       )}
       {tab === "art" && func === "single" && <ArtPanel art={art} onChange={setArt} />}
+      {tab === "symbols" && func === "single" && <SymbolPicker onPick={pickSymbol} />}
+      {tab === "shapes" && func === "single" && (
+        <div className="flex flex-col gap-3">
+          {(["geo", "line"] as const).map((group) => (
+            <div key={group} className="flex flex-col gap-2">
+              <h3 className="text-sm font-semibold">{group === "geo" ? L("表格與幾何圖形", "Tables and shapes") : L("線條、箭頭與曲線", "Lines, arrows and curves")}</h3>
+              <div className="flex flex-wrap gap-2">
+                {SHAPES.filter((s) => s.group === group).map((s) => (
+                  <Button key={s.id} variant="outline" size="sm" className="rounded-full" onClick={() => addShape(s.id)}>
+                    <Plus className="size-3.5" aria-hidden="true" />
+                    {L(s.zh, s.en)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {shapes.length > 0 && (
+            <div className="flex flex-wrap gap-2" role="group" aria-label={L("已加入的圖形", "Added shapes")}>
+              {shapes.map((s, i) => {
+                const d = SHAPES.find((x) => x.id === s.kind);
+                return (
+                  <Chip key={s.id} active={shapeTarget?.id === s.id} onClick={() => setSelectedShape(s.id)}>
+                    {i + 1}. {d ? L(d.zh, d.en) : s.kind}
+                  </Chip>
+                );
+              })}
+            </div>
+          )}
+          {shapeTarget && shapeDef && (
+            <div className="flex flex-col gap-3 rounded-xl bg-secondary p-3">
+              <Range label={L("線條粗細", "Line weight")} value={shapeTarget.stroke} min={0.5} max={10} step={0.5} onChange={(v) => updateShape(shapeTarget.id, { stroke: v })} />
+              <Range label={L("寬度", "Width")} value={shapeTarget.w} min={5} max={100} step={1} onChange={(v) => updateShape(shapeTarget.id, { w: v })} />
+              {!straight.includes(shapeDef.id) && (
+                <Range label={L("高度", "Height")} value={shapeTarget.h} min={3} max={100} step={1} onChange={(v) => updateShape(shapeTarget.id, { h: v })} />
+              )}
+              <Range label={L("旋轉", "Rotate")} value={shapeTarget.rot} min={-180} max={180} step={5} suffix="°" onChange={(v) => updateShape(shapeTarget.id, { rot: v })} />
+              <Range label={L("透明度", "Opacity")} value={Math.round((shapeTarget.alpha ?? 1) * 100)} min={5} max={100} step={5} suffix="%" onChange={(v) => updateShape(shapeTarget.id, { alpha: v / 100 })} />
+              {shapeTarget.kind === "table" && (
+                <>
+                  <Range label={L("列數", "Rows")} value={shapeTarget.rows} min={1} max={10} step={1} onChange={(v) => updateShape(shapeTarget.id, { rows: v })} />
+                  <Range label={L("欄數", "Columns")} value={shapeTarget.cols} min={1} max={10} step={1} onChange={(v) => updateShape(shapeTarget.id, { cols: v })} />
+                </>
+              )}
+              <Swatches label={L("線條顏色", "Line color")} value={shapeTarget.color} onChange={(c) => updateShape(shapeTarget.id, { color: c })} />
+              {shapeDef.closed && (
+                <div className="flex flex-col gap-2">
+                  <Swatches label={L("填滿顏色", "Fill color")} value={shapeTarget.fill ?? "#ffffff"} onChange={(c) => updateShape(shapeTarget.id, { fill: c })} />
+                  <Button variant="outline" className="self-start" onClick={() => updateShape(shapeTarget.id, { fill: null })}>
+                    {L("不填滿", "No fill")}
+                  </Button>
+                </div>
+              )}
+              <Button
+                variant="outline"
+                className="self-start"
+                onClick={() => {
+                  setShapes((prev) => prev.filter((s) => s.id !== shapeTarget.id));
+                  setSelectedShape(null);
+                }}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                {L("刪除", "Delete")}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
       {tab === "stickers" && (
         <StickerPanel
           stickers={stickers}
           selectedId={selectedSticker}
           total={total}
+          still={stillOnly}
           noNudge
           onAdd={addSticker}
           onSelect={setSelectedSticker}
@@ -1161,7 +1319,7 @@ function EditorViewInner({
           }}
         />
       )}
-      {tab === "music" && (
+      {tab === "music" && !stillOnly && (
         <MusicPanel
           name={musicName}
           volume={musicVolume}
@@ -1173,7 +1331,7 @@ function EditorViewInner({
           onRemove={removeMusic}
         />
       )}
-      {tab === "sfx" && (
+      {tab === "sfx" && !stillOnly && (
         <SfxPanel
           time={time}
           total={total}
@@ -1209,7 +1367,8 @@ function EditorViewInner({
         ) : (
           <MotionPanel templateId={templateId} onPick={(m) => setTemplateId(m.id)} />
         ))}
-</EditLockPanel>}
+</EditLockPanel>
+      )}
 
       {clips.length > 0 && (!aiGuided || aiStage === "done") && (
         <div className="flex flex-col gap-2">
@@ -1225,7 +1384,12 @@ function EditorViewInner({
           )}
           <SaveDialog pending={pending} onClose={() => setPending(null)} />
       {lifecycle && <LifecycleBar lifecycle={lifecycle} disabled={exporting} />}
-          {func === "single" && (
+          {func === "single" && stillOnly && (
+            <p className="text-center text-xs text-muted-foreground">
+              {L("純照片模式：會輸出目前預覽畫面的 PNG 圖片，不含動態。", "Photo-only mode: exports the current preview frame as a PNG, no motion.")}
+            </p>
+          )}
+          {func === "single" && !stillOnly && (
             <div className="grid grid-cols-2 gap-2" role="group" aria-label={L("輸出方式", "Output")}>
               <Button type="button" variant={outFmt === "orig" ? "default" : "outline"} className="h-auto flex-col gap-0.5 py-2" onClick={() => setOutFmt("orig")} aria-pressed={outFmt === "orig"} disabled={exporting}>
                 <span>{L("保持原創", "Keep original")}</span>

@@ -164,7 +164,14 @@ export function StudioScreen() {
           });
         }
       } catch {
-        toast.error(t("chatError"));
+        const retryText = t("chatError");
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", text: retryText }]);
+        setSuggestions([text]);
+        if (mode === "voice") {
+          voice.speak(retryText, () => {
+            if (autoListen.current) voice.startListening();
+          });
+        }
       } finally {
         setLoading(false);
       }

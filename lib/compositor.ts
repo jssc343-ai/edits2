@@ -2,6 +2,8 @@ import { MOTION_PERIOD, type MotionTemplate, type ParticleKind } from "@/lib/tem
 import { drawStickers, type StickerItem } from "@/lib/stickers";
 import { drawArt, type ArtState } from "@/lib/art";
 
+import { drawShape, type ShapeItem } from "@/lib/shapes";
+
 export type TransitionId = "none" | "fade" | "slide" | "slideUp" | "zoom" | "wipe" | "flip" | "blur" | "spin" | "iris";
 
 export const FONTS: { family: string; weight: number; zh: string; en: string }[] = [
@@ -58,7 +60,7 @@ export const FONTS: { family: string; weight: number; zh: string; en: string }[]
 
 export const fontSpec = (family: string) => FONTS.find((f) => f.family === family) ?? FONTS[0];
 export type FilterId = "none" | "warm" | "cool" | "mono" | "vivid" | "vintage";
-export type Aspect = "9:16" | "1:1" | "16:9" | "3:4" | "4:3" | "4:5";
+export type Aspect = "9:16" | "1:1" | "16:9" | "3:4" | "4:3" | "4:5" | "2:3" | "3:2";
 
 export const TRANSITIONS: { id: TransitionId; zh: string; en: string }[] = [
   { id: "none", zh: "無", en: "None" },
@@ -188,6 +190,7 @@ export interface Project {
   template: MotionTemplate | null;
   fadeInOut: boolean;
   stickers: StickerItem[];
+  shapes?: ShapeItem[];
   art?: ArtState;
 }
 
@@ -208,6 +211,8 @@ export function aspectSize(a: Aspect): { w: number; h: number } {
   if (a === "3:4") return { w: 540, h: 720 };
   if (a === "4:3") return { w: 720, h: 540 };
   if (a === "4:5") return { w: 576, h: 720 };
+  if (a === "2:3") return { w: 480, h: 720 };
+  if (a === "3:2") return { w: 720, h: 480 };
   return { w: 404, h: 720 };
 }
 
@@ -808,6 +813,7 @@ export function renderAt(
 
   drawArt(ctx, W, H, project.art);
   const layered = [
+    ...(project.shapes ?? []).map((item, i) => ({ z: item.z ?? i, draw: () => drawShape(ctx, item, W) })),
     ...project.stickers.map((item, i) => ({ z: item.z ?? 1000 + i, draw: () => drawStickers(ctx, [item], tt) })),
     ...project.texts.map((item, i) => ({ z: item.z ?? 2000 + i, draw: () => drawText(ctx, [item], tt) })),
   ].sort((a, b) => a.z - b.z);

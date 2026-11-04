@@ -1,4 +1,4 @@
-export type EditFunc = "card" | "collage" | "single" | "photos" | "video" | "cutout" | "sticker";
+export type EditFunc = "card" | "collage" | "single" | "photos" | "video" | "cutout" | "sticker" | "restore";
 export type EditModeId = "hand" | "ai";
 
 interface FuncDef {
@@ -17,6 +17,7 @@ export const FUNCS_HAND: FuncDef[] = [
   { id: "video", zh: "10 分鐘短影片幻燈片編輯", en: "Short video (10 min)", descZh: "剪輯最長 10 分鐘影片，分割、調速、濾鏡與音樂", descEn: "Edit up to 10 minutes: split, speed, filters, music" },
   { id: "cutout", zh: "照片除背（無背景、透明）", en: "Remove background", descZh: "手動點選背景顏色，輸出透明 PNG", descEn: "Tap the background colour and export a transparent PNG" },
   { id: "sticker", zh: "貼圖製作（Emoji……）", en: "Sticker maker", descZh: "用 Emoji 與文字自己做貼圖，輸出透明 PNG", descEn: "Build stickers from emoji and text, export transparent PNG" },
+  { id: "restore", zh: "延用圖片修復", en: "Reuse & repair image", descZh: "塗抹舊問候圖的文字與圖案，系統自動清除，再重新加字、加素材", descEn: "Paint over old text and artwork, it clears automatically, then add new text and materials" },
 ];
 
 export const FUNCS_AI: FuncDef[] = [
@@ -27,6 +28,7 @@ export const FUNCS_AI: FuncDef[] = [
   { id: "video", zh: "30 分鐘短影片幻燈片編輯", en: "Short video (30 min)", descZh: "剪輯最長 30 分鐘影片，AI 協助整理", descEn: "Edit up to 30 minutes with AI assistance" },
   { id: "cutout", zh: "照片除背（無背景、透明）", en: "Remove background", descZh: "AI 自動辨識人物與物件，一鍵去背", descEn: "AI detects the subject and removes the background in one tap" },
   { id: "sticker", zh: "貼圖製作（Emoji……）", en: "Sticker maker", descZh: "AI 把相片變成貼圖，或用文字生成 Emoji 貼圖", descEn: "AI turns photos into stickers or builds emoji stickers" },
+  { id: "restore", zh: "延用圖片修復", en: "Reuse & repair image", descZh: "用對話指定要清除的文字區域，AI 判定清除，再用 3D 動態重新編輯", descEn: "Tell the AI which text to clear, then re-edit with AI 3D motion" },
 ];
 
 export const FUNCS = FUNCS_HAND;

@@ -95,6 +95,14 @@ Actions:
 - finish: the player is happy and wants to use the cutout (add it as a sticker). download: download the transparent PNG.
 ${TUNE_RULES}`;
 
+const RESTORE_RULES = `The player is repairing an old greeting image: removing its old text or artwork so new text can be added afterwards. They talk to you. Carry out exactly what is asked.
+Actions:
+- erase_rect: clear the old text or artwork inside a rectangle; the system detects the exact letters and fills the background. x,y = top-left, w,h = size, all fractions 0 to 1 of the image (0,0 top-left). Example: "clear the text at the top" = x 0, y 0, w 1, h 0.25. "clear the bottom line" = x 0, y 0.8, w 1, h 0.2. "clear the middle" = x 0.1, y 0.3, w 0.8, h 0.4. Use several actions for several areas.
+- undo: undo the last clearing. reset: back to the original image.
+- set_brush: amount 1 to 40.
+- finish: the player is happy and wants to continue editing (add new text and materials). download: download the repaired image.
+If the image is not uploaded yet, tell the player to upload it with the upload button.`;
+
 const STICKER_RULES = `The player is making a sticker (a 512 by 512 transparent image) and talks to you. Items are numbered from 1 in the order listed in the current state; "this one"/"it" means the selected item (selected = true), otherwise the last item. Carry out exactly what is asked, step by step.
 Actions:
 - add_emoji: text = one emoji (choose it yourself from the meaning: "a heart" = the heart emoji). Optional x,y position 0 to 1 and amount = size 40 to 480.
@@ -116,7 +124,7 @@ export async function POST(req: Request) {
   const lang = getLang(body.lang ?? "en");
   const sticker = body.kind === "sticker";
 
-  const system = `You are the expert assistant inside "Jsc343 AI Edits 2". ${sticker ? STICKER_RULES : CUTOUT_RULES}
+  const system = `You are the expert assistant inside "Jsc343 AI Edits 2". ${sticker ? STICKER_RULES : body.kind === "restore" ? RESTORE_RULES : CUTOUT_RULES}
 The player may speak or type in any of 30+ languages (often through voice recognition, so expect typos and filler words). Understand the intent whatever the language, resolve vague words from the earlier chat and the current state, and return one action per thing asked.
 If the request is unclear, ask one short question and return no actions. If something is impossible (for example the photo is not uploaded yet), say so briefly.
 Reply in ${lang.english}, one or two short sentences describing what you did.
